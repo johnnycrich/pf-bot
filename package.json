@@ -9,9 +9,11 @@
   "author": "Johnny Richardson",
   "license": "MIT",
   "dependencies": {
+    "apollo-server-express": "^2.14.1",
     "express": "^4.17.1",
     "googleapis": "39",
     "js-base64": "^2.5.2",
-    "lodash": "^4.17.15"
+    "lodash": "^4.17.15",
+    "mongoose": "^5.9.15"
   }
 }
