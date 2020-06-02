@@ -26,44 +26,62 @@ SOFTWARE.
 
 */
 
-
 const {
     google
 } = require('googleapis');
-const express = require('express')
+const express = require('express');
 const base64 = require('js-base64').Base64;
 const _ = require('lodash');
-const OAuth2Data = require('./credentials.json')
+const OAuth2Data = require('./credentials.json');
 
-const app = express()
+// Create apollo config/graph schema
+const apollo = require('./apollo');
+
+// Connect db
+require('./db');
+
+// Dog model
+const Dog = require('./models/Dog');
+
+const app = express();
 
 const CLIENT_ID = OAuth2Data.client.id;
 const CLIENT_SECRET = OAuth2Data.client.secret;
-const REDIRECT_URL = OAuth2Data.client.redirect
+const REDIRECT_URL = OAuth2Data.client.redirect;
 
-const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URL)
-var authed = false;
+const oAuth2Client = new google.auth.OAuth2(
+    CLIENT_ID,
+    CLIENT_SECRET,
+    REDIRECT_URL
+);
+let authed = false;
+
+// Mount apollo middleware (/graphql)
+app.use(apollo.getMiddleware());
 
 app.get('/', async (req, res) => {
+
+    const newDog = new Dog({
+        name: 'Brielle',
+        dateAdded: Date.now()
+    });
+    newDog.save();
+
     if (!authed) {
-        
         // Generate an OAuth URL and redirect there
         const url = oAuth2Client.generateAuthUrl({
             access_type: 'offline',
-            scope: 'https://www.googleapis.com/auth/gmail.readonly'
+            scope: 'https://www.googleapis.com/auth/gmail.readonly',
         });
         res.redirect(url);
-
     } else {
-
         // Get all user emails
         const gmail = google.gmail({
             version: 'v1',
-            auth: oAuth2Client
+            auth: oAuth2Client,
         });
 
         try {
-
             // List of msg ids
             const res = await gmail.users.messages.list({
                 userId: 'me',
@@ -75,32 +93,50 @@ app.get('/', async (req, res) => {
                 msgs.forEach(async (msg) => {
                     const messageRes = await gmail.users.messages.get({
                         id: msg.id,
-                        userId: 'me'
+                        userId: 'me',
                     });
-                    
+
                     // If message has the subject we're looking for...
                     const subject = 'Petfinder Adoption Inquiry';
-                    const isInquiry = _.find(messageRes.data.payload.headers, {
-                        name: 'Subject'
-                    }).value === subject;
+                    const isInquiry =
+                        _.find(messageRes.data.payload.headers, {
+                            name: 'Subject',
+                        }).value === subject;
+
                     if (isInquiry) {
                         // ...decode raw body
-                        const bodyBase64 = res.data.payload.parts[0].parts[0].body.data;
-                        const bodyDecoded = base64.decode(bodyBase64.replace(/-/g, '+').replace(/_/g, '/'));
+                        const bodyBase64 = messageRes.data.payload.parts[0].parts[0].body.data;
+                        const bodyDecoded = base64.decode(
+                            bodyBase64.replace(/-/g, '+').replace(/_/g, '/')
+                        );
 
                         // Find target string w/ 🐶 name via some group matching
                         // Name is second group
-                        const pattern = new RegExp(/(Congratulations!) (.*) has received an adoption inquiry/g);
+                        const pattern = new RegExp(
+                            /(Congratulations!) (.*) has received an adoption inquiry/g
+                        );
                         const strMatches = pattern.exec(bodyDecoded);
                         const pupName = strMatches[2];
 
-                        console.log('Pup name', pupName);
+                        console.log('Pup name', pupName, Dog.findOne);
 
-                        // TODO: Here is where we'll query internal DB to see
-                        // if dog is pending adoption and if so, 
-                        // send auto-reply to sender
+                        // Find if dog is pending in db by greedy partial name match, 
+                        // which accounts for other things in dog name
+                        try {
+                            const dogResult = await Dog.findOne({
+                                name: {
+                                    $regex: pupName,
+                                    $options: "i"
+                                }
+                            }, 'name pending -_id').exec();
+                            console.log(dogResult)
+                        } catch (err) {
+                            throw new Error(err);
+                        }
+
+                        res.send('Logged in');
+
                     }
-
                 });
             } else {
                 console.log('Inbox empty.');
@@ -108,24 +144,22 @@ app.get('/', async (req, res) => {
         } catch (e) {
             throw new Error(`The API returned an error: ${e.toString()}`);
         }
-
-        res.send('Logged in')
     }
-})
+});
 
 app.get('/auth/google/callback', function (req, res) {
-    const code = req.query.code
+    const code = req.query.code;
     if (code) {
         // Get an access token based on our OAuth code
         oAuth2Client.getToken(code, function (err, tokens) {
             if (err) {
-                console.log('Error authenticating')
+                console.log('Error authenticating');
                 console.log(err);
             } else {
                 console.log('Successfully authenticated');
                 oAuth2Client.setCredentials(tokens);
                 authed = true;
-                res.redirect('/')
+                res.redirect('/');
             }
         });
     }
