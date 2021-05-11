@@ -13,7 +13,7 @@
     "express": "^4.17.1",
     "googleapis": "39",
     "js-base64": "^2.5.2",
-    "lodash": "^4.17.15",
+    "lodash": "^4.17.21",
     "mongoose": "^5.9.15"
   }
 }
